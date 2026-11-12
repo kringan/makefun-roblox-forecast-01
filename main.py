@@ -7,14 +7,16 @@ Reads /input/history.ndjson + /input/task.json, writes /output/forecast.json.
 Model, all estimated from the history it is given:
 - Rank diffusion: a game's rank moves as change = mu[band] + momentum*velocity +
   a residual resampled from that band's observed residuals (the changes are
-  heavy-tailed, kurtosis 6-12, so a Gaussian understates big moves).
+  heavy-tailed, so a Gaussian understates big moves).
 - Momentum: next change carries MOMENTUM * velocity, velocity = last per-hour rank
   change, coefficient from a regression of next change on velocity.
 - New entrants: Poisson(new_rate) fresh games per hour, entry rank sampled from the
-  observed entry ranks; a small share are breakouts with a strong upward drift
-  (brand-new games whose growth explodes to the top within a day or two). Entrants
-  are unnamed (their universe ids are unknowable), so the fraction of (run, hour)
-  they hold at a place becomes that place's unnamed share.
+  observed entry ranks. Entrants are unnamed (their universe ids are unknowable),
+  so the fraction of (run, hour) they hold at a place becomes that place's
+  unnamed share.
+- A small share of entrants are breakouts: brand-new games whose growth explodes
+  and carry them to the top within a day or two. They get a strong upward drift
+  until they reach the top band.
 - Age-out: a game leaves the chart 28 days after its `created` date, when the history
   carries details (the house recorder's reads); the archive carries none, so the
   practice run simply has no age-out.
@@ -64,8 +66,8 @@ def main():
     deadline = parse_ts(task["history_until"])
 
     # ---- diffusion kernel: change ~ mu*dt + residual*sqrt(dt), residual resampled
-    # from the observed per-band residuals (heavy-tailed: kurtosis 6-12, so a Gaussian
-    # understates big moves). momentum adds MOMENTUM * velocity to the drift. ----
+    # from the observed per-band residuals (heavy-tailed, so a Gaussian understates
+    # big moves). momentum adds MOMENTUM * velocity to the drift. ----
     samples = [[] for _ in range(6)]
     for a, b in zip(rows, rows[1:]):
         dt = (parse_ts(b["at"]) - parse_ts(a["at"])) / 3600.0
@@ -109,10 +111,6 @@ def main():
             mom_coef = max(-0.5, min(0.5, cov / varx))
 
     # ---- new entrants: rate per hour + entry-rank distribution ----
-    # A small share of entrants are breakouts: brand-new games whose growth explodes
-    # and carry them to the top within a day or two (in the practice window Do Not
-    # Stop. and Bloody Ragdoll Physics did exactly that, reaching #1/#2 from outside
-    # the chart). They get a strong upward drift until they reach the top band.
     entry_ranks = []
     new_n, new_dt = 0, 0.0
     for a, b in zip(rows, rows[1:]):
@@ -130,7 +128,7 @@ def main():
     BREAKOUT_SHARE = 0.20
     BREAKOUT_DRIFT = -8.0
 
-    # ---- closing chart + velocities + created dates (for age-out) ----
+    # ---- closing chart + velocities ----
     # Velocity is the last per-hour rank change (last two reads); a longer window
     # tested worse on the three validation windows.
     last = rows[-1]
